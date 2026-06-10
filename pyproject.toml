@@ -3,7 +3,7 @@ requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "escrutinio_elecciones_col"
+name = "elecc-colombia"
 version = "0.0.1"
 description = "A short description of the project."
 authors = [
@@ -16,9 +16,20 @@ classifiers = [
     "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
+    "anthropic>=0.40",
+    "asyncio>=4.0.0",
+    "easyocr>=1.7",
+    "numpy>=2.0",
+    "ipykernel>=7.2.0",
+    "jupyterlab>=4.5.8",
     "loguru",
     "mkdocs",
+    "nbautoexport>=0.5.2",
+    "pdf2image>=1.17",
+    "pdfplumber>=0.11",
     "pip",
+    "playwright>=1.60.0",
+    "pytesseract>=0.3",
     "pytest",
     "python-dotenv",
     "ruff",
@@ -30,13 +41,13 @@ requires-python = "~=3.14.0"
 
 [tool.ruff]
 line-length = 99
-src = ["escrutinio_elecciones_col"]
-include = ["pyproject.toml", "escrutinio_elecciones_col/**/*.py"]
+src = ["elecc_colombia"]
+include = ["pyproject.toml", "elecc_colombia/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
 
 [tool.ruff.lint.isort]
-known-first-party = ["escrutinio_elecciones_col"]
+known-first-party = ["elecc_colombia"]
 force-sort-within-sections = true
 

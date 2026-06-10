@@ -27,7 +27,7 @@ A short description of the project.
 │                         `1.0-jqp-initial-data-exploration`.
 │
 ├── pyproject.toml     <- Project configuration file with package metadata for 
-│                         escrutinio_elecciones_col and configuration for tools like black
+│                         elecc_colombia and configuration for tools like black
 │
 ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
 │
@@ -39,9 +39,9 @@ A short description of the project.
 │
 ├── setup.cfg          <- Configuration file for flake8
 │
-└── escrutinio_elecciones_col   <- Source code for use in this project.
+└── elecc_colombia   <- Source code for use in this project.
     │
-    ├── __init__.py             <- Makes escrutinio_elecciones_col a Python module
+    ├── __init__.py             <- Makes elecc_colombia a Python module
     │
     ├── config.py               <- Store useful variables and configuration
     │
@@ -59,3 +59,5 @@ A short description of the project.
 
 --------
 
+## Information collected from Website
+https://wapp.registraduria.gov.co/electoral/2026/presidente-de-la-republica/
