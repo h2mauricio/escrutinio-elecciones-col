@@ -1,18 +1,15 @@
 import asyncio
 from pathlib import Path
 
-from playwright.async_api import async_playwright, Page
-
+from playwright.async_api import Page, async_playwright
 from elecc_colombia.browser_utils import navigate, select_first_option
+from elecc_colombia.config import (DEPARTMENT_ID, 
+                                   HEADLESS, 
+                                   SLOW_MO, 
+                                   BASE_URL, 
+                                   READY_SELECTOR)
+from loguru import logger
 
-# ── Config ─────────────────────────────────────────────────────────────────────
-DEPARTMENT_ID = 72
-HEADLESS      = False
-SLOW_MO       = 400
-# ──────────────────────────────────────────────────────────────────────────────
-
-URL = f"https://divulgacione14presidente.registraduria.gov.co/departamento/{DEPARTMENT_ID}"
-READY_SELECTOR = "input[placeholder='seleccione el municipio']"
 
 
 async def click_consultar(page: Page) -> None:
@@ -49,19 +46,25 @@ async def extract_mesas(page: Page) -> list[dict]:
     return results
 
 
-async def download_first_acta(page: Page) -> None:
+async def download_first_acta(page: Page, download_dir: Path | None = None) -> None:
     """Click Ver on the first mesa, then Descargar in the popup to save the PDF."""
-    download_dir = Path.home() / "Downloads"
+    if download_dir is None:
+        download_dir = Path.home() / "Downloads"
+        
+    # If download_dir doesn't exist, create it
+    download_dir.mkdir(parents=True, exist_ok=True)
 
     first_item = page.locator(".item-table").first
     ver_btn = first_item.locator("button", has_text="Ver")
 
-    print("\n── Acta download ──────────────────────────────")
-    print("  Clicking Ver on Mesa 1...")
+    #Print only when we are debugging using loguru 
+    logger.debug("Starting acta download process...")
+    
+    logger.debug("  Clicking Ver on Mesa 1...")
     await ver_btn.click()
 
     await page.wait_for_selector(".pdf-header", state="visible", timeout=10_000)
-    print("  Modal opened.")
+    logger.debug("  Modal opened.")
 
     descargar_btn = page.locator(".container-button button", has_text="Descargar")
 
@@ -69,18 +72,20 @@ async def download_first_acta(page: Page) -> None:
         await descargar_btn.click()
 
     download = await dl.value
-    dest = download_dir / download.suggested_filename
-    await download.save_as(dest)
-    print(f"  Saved: {dest}")
-
+    download_pathname = download_dir / download.suggested_filename
+    await download.save_as(download_pathname)
+    logger.info(f"Downloaded acta to: {download_pathname}")
+    
+    logger.debug("Acta download process completed.")
 
 async def main() -> None:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO)
         page = await browser.new_page()
-
+        url = BASE_URL + str(DEPARTMENT_ID)
+        logger.info(f"Navigating to URL: {url}")
         try:
-            await navigate(page, URL, READY_SELECTOR)
+            await navigate(page, url, READY_SELECTOR)
 
             print("\n── Municipio ──────────────────────────────────")
             municipio = await select_first_option(page, "seleccione el municipio")
