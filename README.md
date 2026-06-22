@@ -8,19 +8,69 @@ Scraping, digitization, and analysis of Colombian electoral actas (E-14 forms) f
 
 ---
 
+## Contents
+
+- [Prerequisites](#prerequisites)
+  - [uv](#uv)
+  - [make (Windows only)](#make-windows-only)
+  - [System dependencies](#system-dependencies)
+- [Installation](#installation)
+  - [Running notebooks](#running-notebooks)
+- [Configuration](#configuration)
+- [Workflow](#workflow)
+  - [1. Download actas](#1-download-actas)
+  - [2. Extract information from PDFs](#2-extract-information-from-pdfs)
+- [Data structure](#data-structure)
+- [Key modules](#key-modules)
+- [Project Organization](#project-organization)
+
+---
+
 ## Prerequisites
 
 ### uv
-This project uses [uv](https://docs.astral.sh/uv/) for Python and dependency management. Install it once:
+This project uses [uv](https://docs.astral.sh/uv/) for Python and dependency management.
 
+**macOS / Linux:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
 uv will automatically download and pin **Python 3.14** — no separate Python installation needed.
 
-### System dependencies (macOS)
+### make (Windows only)
 
+`make` is not included in Windows by default. Install it with one of the following options:
+
+**Option A — winget** (built into Windows 10/11):
+```powershell
+winget install GnuWin32.Make
+```
+After installation, add `C:\Program Files (x86)\GnuWin32\bin` to your `PATH` if it was not added automatically.
+
+**Option B — Chocolatey:**
+```powershell
+choco install make
+```
+
+**Option C — Scoop:**
+```powershell
+scoop install make
+```
+
+**Option D — skip make entirely** and run the equivalent PowerShell command directly:
+```powershell
+mkdir data\raw, data\interim\crops, data\processed, data\external, logs
+```
+
+### System dependencies
+
+**macOS:**
 ```bash
 # OCR engine for printed text
 brew install tesseract tesseract-lang
@@ -29,10 +79,16 @@ brew install tesseract tesseract-lang
 brew install poppler
 ```
 
-On Ubuntu/Debian:
+**Ubuntu/Debian:**
 ```bash
 sudo apt install tesseract-ocr tesseract-ocr-spa poppler-utils
 ```
+
+**Windows:**
+
+Download and install the official binaries:
+- **Tesseract**: [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) — select "Spanish" language during setup
+- **Poppler**: [oschwartz10612/poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) — extract and add the `bin/` folder to your `PATH`
 
 ---
 
@@ -46,17 +102,27 @@ cd escrutinio-elecciones-col
 # 2. Create the virtual environment and install all dependencies
 uv sync
 
-# 3. Create the data directory structure
+# 3. Create data directories and register the Jupyter kernel
 make setup
+# On Windows without make, run these two commands instead:
+# mkdir data\raw, data\interim\crops, data\processed, data\external, logs
+# uv run python -m ipykernel install --user --name=escrutinio-elecciones-col --display-name "escrutinio-elecciones-col"
 
 # 4. Install Playwright and the Chromium browser (used for scraping)
 uv run playwright install chromium
 ```
 
-To run any script or notebook within the project environment, prefix with `uv run`:
+### Running notebooks
 
+**Option A — VS Code:** after `make setup`, open a notebook, click the kernel picker (top right) → **Jupyter Kernel…** → select `escrutinio-elecciones-col`. If VS Code gets stuck detecting kernels, select the interpreter first via `Ctrl+Shift+P` → **Python: Select Interpreter** → choose `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (macOS/Linux).
+
+**Option B — terminal (always works):**
 ```bash
 uv run jupyter lab
+```
+
+To run scripts directly:
+```bash
 uv run python elecc_colombia/acta_text_reader.py data/raw/ARAUCA/some_acta.pdf
 ```
 
@@ -90,12 +156,31 @@ The project reads this file automatically via `python-dotenv` when any module fr
 
 ### 1. Download actas
 
-Run notebook [notebooks/1.01_download_actas_create_log.ipynb](notebooks/1.01_download_actas_create_log.ipynb).
+**Option A — notebook:**
+Run [notebooks/1.01_download_actas_create_log.ipynb](notebooks/1.01_download_actas_create_log.ipynb).
 
-- Reads the list of departamentos from `data/external/lista_departamentos_url.csv`
-- Scrapes each departamento's page with Playwright
-- Downloads PDFs into `data/raw/<DEPARTAMENTO>/`
-- Appends one row per acta to `data/interim/actas_log.csv`
+**Option B — command line** (recommended for unattended runs or when Jupyter is unavailable):
+```bash
+# Download all departamentos (segunda vuelta, headless, appends to existing log)
+uv run python scripts/download_actas.py
+
+# Download specific departamentos only
+uv run python scripts/download_actas.py -d ARAUCA -d BOLIVAR -d ANTIOQUIA
+
+# Resume a previous run — only downloads missing files, appends to log
+uv run python scripts/download_actas.py -d SANTANDER
+
+# Use primera vuelta CSV
+uv run python scripts/download_actas.py --csv data/external/lista_departamentos_url.csv
+
+# Start a completely fresh log
+uv run python scripts/download_actas.py --overwrite-log
+
+# Show the browser window (useful to watch or debug)
+uv run python scripts/download_actas.py -d ARAUCA --no-headless --slow-mo 400
+```
+
+Both options write PDFs to `data/raw/<DEPARTAMENTO>/` and append one row per acta to `data/interim/actas_log.csv`.
 
 ### 2. Extract information from PDFs
 

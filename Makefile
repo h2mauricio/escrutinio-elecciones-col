@@ -11,11 +11,12 @@ PYTHON_INTERPRETER = python
 #################################################################################
 
 
-## Create data directory structure (run once after cloning)
+## Create data directory structure and register Jupyter kernel (run once after cloning)
 .PHONY: setup
 setup:
 	mkdir -p data/raw data/interim/crops data/processed data/external logs
-	@echo ">>> Directory structure created."
+	uv run python -m ipykernel install --user --name=escrutinio-elecciones-col --display-name "escrutinio-elecciones-col"
+	@echo ">>> Setup complete. Select the 'escrutinio-elecciones-col' kernel in VS Code or Jupyter."
 
 ## Install Python dependencies
 .PHONY: requirements
