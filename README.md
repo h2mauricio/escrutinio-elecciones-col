@@ -61,3 +61,13 @@ A short description of the project.
 
 ## Information collected from Website
 https://wapp.registraduria.gov.co/electoral/2026/presidente-de-la-republica/
+
+
+## Full Output CSV after process_actas_log() is called:
+
+| Source	| Columns |
+|---|---|
+Website scraper	| RETRIEVAL_TIMESTAMP, DEPARTAMENTO, MUNICIPIO, ZONA, PUESTO, MESA, ACTA_PDF |
+Printed text (Tesseract)	| DEPARTAMENTO_ACTA, MUNICIPIO_ACTA, ZONA_ACTA, PUESTO_ACTA, MESA_ACTA, LUGAR_ACTA | 
+Handwritten nivelación | TOTAL_VOTANTES_E11, TOTAL_VOTOS_URNA, TOTAL_VOTOS_INCINERADOS |
+

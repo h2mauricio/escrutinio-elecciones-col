@@ -1,15 +1,30 @@
 import asyncio
+import re
 from pathlib import Path
 
 from playwright.async_api import Page, async_playwright
-from elecc_colombia.browser_utils import navigate, select_first_option
-from elecc_colombia.config import (DEPARTMENT_ID, 
-                                   HEADLESS, 
-                                   SLOW_MO, 
-                                   BASE_URL, 
-                                   READY_SELECTOR)
+from elecc_colombia.browser_utils import (navigate, select_first_option, select_page_size,
+                                          get_options, select_option_by_text)
+from elecc_colombia.config import (DEPARTMENT_ID,
+                                   HEADLESS,
+                                   SLOW_MO,
+                                   BASE_URL,
+                                   READY_SELECTOR,
+                                   PROJ_ROOT)
+from elecc_colombia.actas_log import save_actas_log
 from loguru import logger
 
+
+def _sanitize(text: str) -> str:
+    """Strip parentheticals and special chars from a dropdown label for use in a filename."""
+    text = re.sub(r'\(.*?\)', '', text)        # remove (100%) etc.
+    text = re.sub(r'[^\w\s]', '', text)        # remove remaining special chars
+    text = re.sub(r'\s+', '_', text.strip())   # collapse whitespace to underscores
+    return text.strip('_').upper()
+
+
+def _build_acta_filename(municipio: str, zona: str, puesto: str, mesa_index: int) -> str:
+    return f"{_sanitize(municipio)}_{_sanitize(zona)}_{_sanitize(puesto)}_mesa_{mesa_index + 1:03d}.pdf"
 
 
 async def click_consultar(page: Page) -> None:
@@ -78,6 +93,102 @@ async def download_first_acta(page: Page, download_dir: Path | None = None) -> N
     
     logger.debug("Acta download process completed.")
 
+    
+    
+async def download_acta_direct(
+    page: Page,
+    download_dir: Path | None = None,
+    mesa_index: int = 0,
+    municipio: str = "",
+    zona: str = "",
+    puesto: str = "",
+) -> Path:
+    """Click the Descargar icon directly on the mesa card, skipping the Ver modal."""
+    if download_dir is None:
+        download_dir = Path.home() / "Downloads"
+
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    selected_item = page.locator(".item-table").nth(mesa_index)
+    descargar_icon = selected_item.locator(".open-pdf")
+
+    logger.debug(f"  Clicking Descargar icon on Mesa {mesa_index + 1}...")
+
+    async with page.expect_download(timeout=30_000) as dl:
+        await descargar_icon.click()
+
+    download = await dl.value
+    filename = _build_acta_filename(municipio, zona, puesto, mesa_index)
+    download_pathname = download_dir / filename
+    await download.save_as(download_pathname)
+    logger.info(f"Downloaded acta to: {download_pathname}")
+
+    aceptar_btn = page.get_by_role("button", name="Aceptar")
+    await aceptar_btn.wait_for(state="visible", timeout=10_000)
+    await aceptar_btn.click()
+    logger.debug("  Popup dismissed.")
+
+    return download_pathname
+
+
+async def download_all_actas(
+    page: Page,
+    download_dir: Path,
+    departamento: str = "",
+    log_path: Path | None = None,
+) -> list[dict]:
+    """Download all available actas across every Municipio → Zona → Puesto → Mesa.
+
+    Returns a list of records (one per available mesa) with keys:
+    DEPARTAMENTO, MUNICIPIO, ZONA, PUESTO, MESA, ACTA_PDF.
+    """
+    download_dir.mkdir(parents=True, exist_ok=True)
+    records = []
+
+    municipios = await get_options(page, "Municipio")
+    logger.info(f"Found {len(municipios)} municipio(s).")
+
+    for municipio in municipios:
+        await select_option_by_text(page, "Municipio", municipio)
+        zonas = await get_options(page, "Zona")
+        logger.info(f"  [{municipio}] {len(zonas)} zona(s).")
+
+        for zona in zonas:
+            await select_option_by_text(page, "Zona", zona)
+            puestos = await get_options(page, "Puesto")
+            logger.info(f"    [{zona}] {len(puestos)} puesto(s).")
+
+            for puesto in puestos:
+                await select_option_by_text(page, "Puesto", puesto)
+                await click_consultar(page)
+                await select_page_size(page, size=96)
+                mesas = await extract_mesas(page)
+
+                for i, mesa in enumerate(mesas):
+                    if not mesa["available"]:
+                        logger.debug(f"      Skipping unavailable {mesa['mesa']}.")
+                        continue
+                    dest = download_dir / _build_acta_filename(municipio, zona, puesto, i)
+                    if dest.exists():
+                        logger.info(f"      Skipping {dest.name} — already downloaded.")
+                    else:
+                        logger.info(f"      Downloading {dest.name}...")
+                        await download_acta_direct(page, download_dir, i, municipio, zona, puesto)
+                    record = {
+                        "DEPARTAMENTO": departamento,
+                        "MUNICIPIO": municipio,
+                        "ZONA": zona,
+                        "PUESTO": puesto,
+                        "MESA": mesa["mesa"],
+                        "ACTA_PDF": str(dest.relative_to(PROJ_ROOT)),
+                    }
+                    records.append(record)
+                    if log_path is not None:
+                        save_actas_log([record], log_path)
+
+    return records
+
+
 async def main() -> None:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO)
@@ -100,6 +211,7 @@ async def main() -> None:
             print(f"  ✓ Puesto selected: {puesto}")
 
             await click_consultar(page)
+            await select_page_size(page, size=96)
             mesas = await extract_mesas(page)
             await download_first_acta(page)
 

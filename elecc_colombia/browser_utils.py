@@ -89,3 +89,46 @@ async def select_option(page: Page, placeholder: str, index: int = 0) -> str:
 async def select_first_option(page: Page, placeholder: str) -> str:
     """Convenience wrapper — selects the first option (index 0)."""
     return await select_option(page, placeholder, index=0)
+
+
+async def _open_dropdown_by_label(page: Page, label: str) -> None:
+    """Open a filter dropdown by its card-item h4 label, closing any open dropdown first."""
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(200)
+    container = page.locator(".card-item").filter(
+        has=page.locator("h4", has_text=label)
+    ).locator("div.input-container")
+    await container.click()
+    await page.wait_for_selector(".dropdown-list li", state="visible", timeout=8_000)
+
+
+async def get_options(page: Page, label: str) -> list[str]:
+    """Return all option texts for the dropdown identified by its card-item label, without selecting."""
+    await _open_dropdown_by_label(page, label)
+    texts = await page.locator(".dropdown-list li p").all_inner_texts()
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(200)
+    return [t.strip() for t in texts]
+
+
+async def select_option_by_text(page: Page, label: str, text: str) -> None:
+    """Select a specific option by its visible text from the dropdown identified by its label."""
+    await _open_dropdown_by_label(page, label)
+    await page.locator(".dropdown-list li").filter(has_text=text).first.click()
+    await page.wait_for_timeout(800)
+
+
+async def select_page_size(page: Page, size: int = 96) -> None:
+    """Select the number of results per page from the button-based 
+    dropdown in the results table header."""
+    # This dropdown uses a <button> (not <input>), so the placeholder-based helpers don't apply.
+    toggle = page.locator(".header-table app-custom-select").filter(
+        has=page.locator("button.custom-button")
+    ).filter(has=page.locator("img[src*='arrow-bottom']")).locator("div.input-container")
+
+    await toggle.click()
+    await page.wait_for_selector(".dropdown-list li", state="visible", timeout=5_000)
+
+    option = page.locator(".dropdown-list li").filter(has_text=f"{size} mesas por")
+    await option.click()
+    await page.wait_for_selector(".item-table", state="visible", timeout=15_000)
