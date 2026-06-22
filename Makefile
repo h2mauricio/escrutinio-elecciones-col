@@ -11,6 +11,12 @@ PYTHON_INTERPRETER = python
 #################################################################################
 
 
+## Create data directory structure (run once after cloning)
+.PHONY: setup
+setup:
+	mkdir -p data/raw data/interim/crops data/processed data/external logs
+	@echo ">>> Directory structure created."
+
 ## Install Python dependencies
 .PHONY: requirements
 requirements:

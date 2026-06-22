@@ -1,5 +1,8 @@
-# Data
-/data/
+# Data — ignore generated/large files, but track reference data in data/external/
+/data/raw/
+/data/interim/
+/data/processed/
+/logs/
 
 # Mac OS-specific storage files
 .DS_Store
