@@ -4,6 +4,10 @@
 /data/processed/
 /logs/
 
+# Documentation — track markdown source files in docs/, ignore MkDocs build output
+!docs/*.md
+docs/site/
+
 # Mac OS-specific storage files
 .DS_Store
 

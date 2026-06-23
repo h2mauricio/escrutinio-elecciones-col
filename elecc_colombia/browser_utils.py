@@ -1,12 +1,25 @@
 from playwright.async_api import Page
+from elecc_colombia.config import NETWORK_TIMEOUT_MS, PAGE_LOAD_TIMEOUT_MS
 
 
-async def navigate(page: Page, url: str, ready_selector: str) -> None:
+async def navigate(page: Page, url: str, ready_selector: str, retries: int = 3) -> None:
     """Go to a URL and wait until a selector is visible before returning."""
+    import asyncio
     print(f"Opening: {url}")
-    await page.goto(url)
-    await page.wait_for_selector(ready_selector, timeout=15_000)
-    print("Page loaded.")
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            await page.goto(url, timeout=NETWORK_TIMEOUT_MS)
+            await page.wait_for_selector(ready_selector, timeout=PAGE_LOAD_TIMEOUT_MS)
+            print("Page loaded.")
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                wait = 2 ** attempt
+                print(f"  Attempt {attempt} failed ({exc!r}) — retrying in {wait}s…")
+                await asyncio.sleep(wait)
+    raise last_exc
 
 
 async def open_dropdown(page: Page, placeholder: str) -> None:
@@ -131,4 +144,4 @@ async def select_page_size(page: Page, size: int = 96) -> None:
 
     option = page.locator(".dropdown-list li").filter(has_text=f"{size} mesas por")
     await option.click()
-    await page.wait_for_selector(".item-table", state="visible", timeout=15_000)
+    await page.wait_for_selector(".item-table", state="visible", timeout=PAGE_LOAD_TIMEOUT_MS)

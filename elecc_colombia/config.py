@@ -32,6 +32,16 @@ BASE_URL = f"https://divulgacione14presidente.registraduria.gov.co/departamento/
 
 READY_SELECTOR = "input[placeholder='seleccione el municipio']"
 
+# Timeouts (milliseconds)
+# Network operations (page navigation, PDF download) — long because the site is slow.
+NETWORK_TIMEOUT_MS = 30_000
+# Waiting for dynamic page content to appear after a user interaction.
+PAGE_LOAD_TIMEOUT_MS = 15_000
+
+# Maximum number of failed mesa downloads before the script stops and reports
+# the error in the log file. Can be overridden via --max-errors on the CLI.
+MAX_DOWNLOAD_ERRORS = 10
+
 LOGS_DIR = PROJ_ROOT / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 

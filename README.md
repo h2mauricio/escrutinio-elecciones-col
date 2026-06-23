@@ -10,19 +10,30 @@ Scraping, digitization, and analysis of Colombian electoral actas (E-14 forms) f
 
 ## Contents
 
-- [Prerequisites](#prerequisites)
-  - [uv](#uv)
-  - [make (Windows only)](#make-windows-only)
-  - [System dependencies](#system-dependencies)
-- [Installation](#installation)
-  - [Running notebooks](#running-notebooks)
-- [Configuration](#configuration)
-- [Workflow](#workflow)
-  - [1. Download actas](#1-download-actas)
-  - [2. Extract information from PDFs](#2-extract-information-from-pdfs)
-- [Data structure](#data-structure)
-- [Key modules](#key-modules)
-- [Project Organization](#project-organization)
+- [escrutinio-elecciones-col](#escrutinio-elecciones-col)
+  - [Contents](#contents)
+  - [Prerequisites](#prerequisites)
+    - [uv](#uv)
+    - [make (Windows only)](#make-windows-only)
+    - [System dependencies](#system-dependencies)
+  - [Installation](#installation)
+    - [Running notebooks](#running-notebooks)
+  - [Configuration](#configuration)
+  - [Workflow](#workflow)
+    - [1. Download actas](#1-download-actas)
+      - [Resuming after an error or interruption](#resuming-after-an-error-or-interruption)
+      - [Starting from scratch](#starting-from-scratch)
+      - [Stopping automatically after repeated errors](#stopping-automatically-after-repeated-errors)
+    - [2. Extract information from PDFs](#2-extract-information-from-pdfs)
+  - [Data structure](#data-structure)
+    - [`data/interim/actas_log.csv` — download log](#datainterimactas_logcsv--download-log)
+    - [`data/processed/actas_processed.csv` — enriched log](#dataprocessedactas_processedcsv--enriched-log)
+    - [`data/interim/crops/` — handwritten number images](#datainterimcrops--handwritten-number-images)
+  - [Key modules](#key-modules)
+  - [Project Organization](#project-organization)
+  - [Download Error Handling and Resume](#download-error-handling-and-resume)
+  - [Web Scraping](#web-scraping)
+  - [Information source](#information-source)
 
 ---
 
@@ -87,8 +98,11 @@ sudo apt install tesseract-ocr tesseract-ocr-spa poppler-utils
 **Windows:**
 
 Download and install the official binaries:
+- **Visual C++ Redistributable** *(required for Playwright and other C extensions)*: [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 - **Tesseract**: [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) — select "Spanish" language during setup
 - **Poppler**: [oschwartz10612/poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) — extract and add the `bin/` folder to your `PATH`
+
+> **Troubleshooting:** If you get `ImportError: DLL load failed while importing _greenlet`, the Visual C++ Redistributable is missing or outdated. Install it from the link above and reboot.
 
 ---
 
@@ -160,27 +174,60 @@ The project reads this file automatically via `python-dotenv` when any module fr
 Run [notebooks/1.01_download_actas_create_log.ipynb](notebooks/1.01_download_actas_create_log.ipynb).
 
 **Option B — command line** (recommended for unattended runs or when Jupyter is unavailable):
+
+> **Known limitation:** headless mode (`--headless`, the default) currently fails with
+> `ERR_HTTP2_PROTOCOL_ERROR` on the Registraduría site. Always pass `--no-headless --slow-mo`
+> until this is resolved.
+
 ```bash
-# Download all departamentos (segunda vuelta, headless, appends to existing log)
-uv run python scripts/download_actas.py
+# Download all departamentos (segunda vuelta, appends to existing log)
+uv run python scripts/download_actas.py --no-headless --slow-mo 400
 
 # Download specific departamentos only
-uv run python scripts/download_actas.py -d ARAUCA -d BOLIVAR -d ANTIOQUIA
-
-# Resume a previous run — only downloads missing files, appends to log
-uv run python scripts/download_actas.py -d SANTANDER
+uv run python scripts/download_actas.py -d ARAUCA -d BOLIVAR -d ANTIOQUIA --no-headless --slow-mo 400
 
 # Use primera vuelta CSV
-uv run python scripts/download_actas.py --csv data/external/lista_departamentos_url.csv
-
-# Start a completely fresh log
-uv run python scripts/download_actas.py --overwrite-log
-
-# Show the browser window (useful to watch or debug)
-uv run python scripts/download_actas.py -d ARAUCA --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --csv data/external/lista_departamentos_url.csv --no-headless --slow-mo 400
 ```
 
 Both options write PDFs to `data/raw/<DEPARTAMENTO>/` and append one row per acta to `data/interim/actas_log.csv`.
+
+#### Resuming after an error or interruption
+
+Re-run the **exact same command**. The script reads `actas_log.csv` and skips every mesa already recorded there — only missing ones are downloaded:
+
+```bash
+# Resume CALDAS from where it stopped (no extra flags needed)
+uv run python scripts/download_actas.py -d CALDAS --no-headless --slow-mo 400
+```
+
+The console will confirm how many actas are being skipped:
+```
+INFO  | Resuming CALDAS: 47 actas already logged — skipping.
+```
+
+#### Starting from scratch
+
+To discard the existing log and re-download everything, use `--overwrite-log`.
+> **Warning:** this clears the **entire** log, not just one departamento.
+
+```bash
+uv run python scripts/download_actas.py --overwrite-log --no-headless --slow-mo 400
+```
+
+#### Stopping automatically after repeated errors
+
+By default the script stops after **10 consecutive mesa download failures** and logs a `CRITICAL` message pointing to the log file. Re-running resumes from where it stopped. To change the threshold:
+
+```bash
+# Stop after 5 errors instead of 10
+uv run python scripts/download_actas.py -d CALDAS --max-errors 5 --no-headless --slow-mo 400
+
+# Never stop automatically (not recommended for unattended runs)
+uv run python scripts/download_actas.py -d CALDAS --max-errors 999 --no-headless --slow-mo 400
+```
+
+See [docs/download_error_handling.md](docs/download_error_handling.md) for the full explanation of error handling and resume logic.
 
 ### 2. Extract information from PDFs
 
@@ -254,6 +301,28 @@ crops/
 ## Project Organization
 
 See [docs/project_organization.md](docs/project_organization.md) for the full directory tree and data flow diagram.
+
+---
+
+## Download Error Handling and Resume
+
+See [docs/download_error_handling.md](docs/download_error_handling.md) for a full explanation of:
+
+- How each PDF record is saved to `actas_log.csv` immediately after download (no data lost on crash)
+- How individual mesa failures are caught and skipped without aborting the departamento
+- How to resume an interrupted download by re-running the same command
+- How `--overwrite-log` works for a clean restart
+
+---
+
+## Web Scraping
+
+See [docs/web_scraping.md](docs/web_scraping.md) for a full explanation of:
+
+- Website structure and the four-level dropdown navigation (Municipio → Zona → Puesto → Mesa)
+- Step-by-step scraping flow: navigation, mesa extraction, PDF download, log writing
+- Anti-bot mitigations and the known headless limitation
+- Timeout constants and retry behaviour
 
 ---
 

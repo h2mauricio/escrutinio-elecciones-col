@@ -45,15 +45,21 @@ class CropSpec:
     Attributes:
         x_start_frac:  Left edge of crop as fraction of image width.
         x_end_frac:    Right edge of crop as fraction of image width.
-        y_pad_frac:    Vertical padding above/below the label row as a multiple
-                       of the row height.
-        top_trim_frac: Fraction of padded crop height to remove from top
-                       (trims the printed label text so only the handwritten
-                       area remains).
+        y_pad_frac:    Vertical padding below (and above, unless y_top_pad_frac
+                       is set) the label row as a multiple of the row height.
+        y_top_pad_frac: Vertical padding above the label row as a multiple of
+                       the row height. When None, falls back to y_pad_frac.
+                       Set to a larger value when handwritten numbers are
+                       written above the printed label.
+        top_trim_frac: Fraction of padded crop height to remove from top.
+                       Trims the printed label text so only the handwritten
+                       area remains. Set to 0.0 when numbers are above the
+                       label and must not be cut off.
     """
     x_start_frac: float = 0.67
     x_end_frac: float = 0.867
     y_pad_frac: float = 1.0
+    y_top_pad_frac: float | None = None
     top_trim_frac: float = 0.13
 
 
@@ -85,9 +91,11 @@ def _apply_crop(img: np.ndarray, y_top: int, y_bottom: int, spec: CropSpec) -> n
     x_start = int(img_w * spec.x_start_frac)
     x_end = int(img_w * spec.x_end_frac)
     row_h = max(1, y_bottom - y_top)
-    pad_y = max(10, int(row_h * spec.y_pad_frac))
-    crop_top = max(0, y_top - pad_y)
-    crop_bot = min(img_h, y_bottom + pad_y)
+    bot_pad = max(10, int(row_h * spec.y_pad_frac))
+    top_frac = spec.y_top_pad_frac if spec.y_top_pad_frac is not None else spec.y_pad_frac
+    top_pad = max(10, int(row_h * top_frac))
+    crop_top = max(0, y_top - top_pad)
+    crop_bot = min(img_h, y_bottom + bot_pad)
     top_trim = int((crop_bot - crop_top) * spec.top_trim_frac)
     return img[crop_top + top_trim : crop_bot, x_start:x_end]
 

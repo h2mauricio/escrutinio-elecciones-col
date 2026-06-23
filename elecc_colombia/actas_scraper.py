@@ -10,9 +10,16 @@ from elecc_colombia.config import (DEPARTMENT_ID,
                                    SLOW_MO,
                                    BASE_URL,
                                    READY_SELECTOR,
-                                   PROJ_ROOT)
-from elecc_colombia.actas_log import save_actas_log
+                                   PROJ_ROOT,
+                                   MAX_DOWNLOAD_ERRORS,
+                                   NETWORK_TIMEOUT_MS,
+                                   PAGE_LOAD_TIMEOUT_MS)
+from elecc_colombia.actas_log import save_actas_log, load_downloaded_paths
 from loguru import logger
+
+
+class TooManyDownloadErrors(Exception):
+    """Raised when failed mesa downloads exceed the max_errors threshold."""
 
 
 def _sanitize(text: str) -> str:
@@ -34,7 +41,7 @@ async def click_consultar(page: Page) -> None:
     print("\n── Consultar ──────────────────────────────────")
     print("  Clicking Consultar...")
     await btn.click()
-    await page.wait_for_selector(".item-table", state="visible", timeout=15_000)
+    await page.wait_for_selector(".item-table", state="visible", timeout=PAGE_LOAD_TIMEOUT_MS)
     print("  Results loaded.")
 
 
@@ -83,7 +90,7 @@ async def download_first_acta(page: Page, download_dir: Path | None = None) -> N
 
     descargar_btn = page.locator(".container-button button", has_text="Descargar")
 
-    async with page.expect_download(timeout=30_000) as dl:
+    async with page.expect_download(timeout=NETWORK_TIMEOUT_MS) as dl:
         await descargar_btn.click()
 
     download = await dl.value
@@ -114,7 +121,7 @@ async def download_acta_direct(
 
     logger.debug(f"  Clicking Descargar icon on Mesa {mesa_index + 1}...")
 
-    async with page.expect_download(timeout=30_000) as dl:
+    async with page.expect_download(timeout=NETWORK_TIMEOUT_MS) as dl:
         await descargar_icon.click()
 
     download = await dl.value
@@ -136,6 +143,7 @@ async def download_all_actas(
     download_dir: Path,
     departamento: str = "",
     log_path: Path | None = None,
+    max_errors: int = MAX_DOWNLOAD_ERRORS,
 ) -> list[dict]:
     """Download all available actas across every Municipio → Zona → Puesto → Mesa.
 
@@ -144,6 +152,15 @@ async def download_all_actas(
     """
     download_dir.mkdir(parents=True, exist_ok=True)
     records = []
+
+    # Load already-logged paths for this departamento so we can skip them.
+    already_logged: set[str] = (
+        load_downloaded_paths(departamento, log_path) if log_path is not None else set()
+    )
+    if already_logged:
+        logger.info(f"  Resuming {departamento}: {len(already_logged)} actas already logged — skipping.")
+
+    error_count = 0
 
     municipios = await get_options(page, "Municipio")
     logger.info(f"Found {len(municipios)} municipio(s).")
@@ -169,11 +186,32 @@ async def download_all_actas(
                         logger.debug(f"      Skipping unavailable {mesa['mesa']}.")
                         continue
                     dest = download_dir / _build_acta_filename(municipio, zona, puesto, i)
+                    dest_rel = str(dest.relative_to(PROJ_ROOT))
+                    if dest_rel in already_logged:
+                        logger.debug(f"      Skipping {dest.name} — already in log.")
+                        continue
                     if dest.exists():
-                        logger.info(f"      Skipping {dest.name} — already downloaded.")
+                        logger.info(f"      Skipping {dest.name} — file exists, adding to log.")
                     else:
                         logger.info(f"      Downloading {dest.name}...")
-                        await download_acta_direct(page, download_dir, i, municipio, zona, puesto)
+                        try:
+                            await download_acta_direct(page, download_dir, i, municipio, zona, puesto)
+                        except Exception as e:
+                            error_count += 1
+                            logger.error(
+                                f"      Failed to download {dest.name}: {e} "
+                                f"[error {error_count}/{max_errors}]"
+                            )
+                            if error_count >= max_errors:
+                                logger.critical(
+                                    f"Stopping {departamento}: reached {max_errors} download errors. "
+                                    f"{len(records)} actas were saved before stopping. "
+                                    f"Re-run the same command to resume from where this stopped."
+                                )
+                                raise TooManyDownloadErrors(
+                                    f"{max_errors} errors in {departamento}"
+                                )
+                            continue  # skip recording this mesa — file is not on disk
                     record = {
                         "DEPARTAMENTO": departamento,
                         "MUNICIPIO": municipio,

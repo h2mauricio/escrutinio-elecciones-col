@@ -40,3 +40,22 @@ def save_actas_log(
 
 def load_actas_log(path: Path = ACTAS_LOG_PATH) -> pd.DataFrame:
     return pd.read_csv(path)
+
+
+def load_downloaded_paths(
+    departamento: str,
+    path: Path = ACTAS_LOG_PATH,
+) -> set[str]:
+    """Return the set of ACTA_PDF paths already logged for a given departamento.
+
+    Used by download_all_actas to skip mesas that are already recorded in the
+    log, preventing duplicate downloads and duplicate log entries on resume.
+
+    Returns an empty set if the log file does not exist or has no rows for
+    that departamento.
+    """
+    if not path.exists():
+        return set()
+    df = pd.read_csv(path, usecols=["DEPARTAMENTO", "ACTA_PDF"])
+    mask = df["DEPARTAMENTO"].str.strip().str.upper() == departamento.strip().upper()
+    return set(df.loc[mask, "ACTA_PDF"].dropna().astype(str))
