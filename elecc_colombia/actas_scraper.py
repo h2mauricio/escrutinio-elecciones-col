@@ -109,8 +109,13 @@ async def download_acta_direct(
     municipio: str = "",
     zona: str = "",
     puesto: str = "",
+    filename_index: int | None = None,
 ) -> Path:
-    """Click the Descargar icon directly on the mesa card, skipping the Ver modal."""
+    """Click the Descargar icon directly on the mesa card, skipping the Ver modal.
+
+    mesa_index: 0-based position within the current results page (for element selection).
+    filename_index: 0-based global mesa number used for the filename; defaults to mesa_index.
+    """
     if download_dir is None:
         download_dir = Path.home() / "Downloads"
 
@@ -125,7 +130,8 @@ async def download_acta_direct(
         await descargar_icon.click()
 
     download = await dl.value
-    filename = _build_acta_filename(municipio, zona, puesto, mesa_index)
+    idx = filename_index if filename_index is not None else mesa_index
+    filename = _build_acta_filename(municipio, zona, puesto, idx)
     download_pathname = download_dir / filename
     await download.save_as(download_pathname)
     logger.info(f"Downloaded acta to: {download_pathname}")
@@ -179,50 +185,71 @@ async def download_all_actas(
                 await select_option_by_text(page, "Puesto", puesto)
                 await click_consultar(page)
                 await select_page_size(page, size=96)
-                mesas = await extract_mesas(page)
 
-                for i, mesa in enumerate(mesas):
-                    if not mesa["available"]:
-                        logger.debug(f"      Skipping unavailable {mesa['mesa']}.")
-                        continue
-                    dest = download_dir / _build_acta_filename(municipio, zona, puesto, i)
-                    dest_rel = str(dest.relative_to(PROJ_ROOT))
-                    if dest_rel in already_logged:
-                        logger.debug(f"      Skipping {dest.name} — already in log.")
-                        continue
-                    if dest.exists():
-                        logger.info(f"      Skipping {dest.name} — file exists, adding to log.")
-                    else:
-                        logger.info(f"      Downloading {dest.name}...")
-                        try:
-                            await download_acta_direct(page, download_dir, i, municipio, zona, puesto)
-                        except Exception as e:
-                            error_count += 1
-                            logger.error(
-                                f"      Failed to download {dest.name}: {e} "
-                                f"[error {error_count}/{max_errors}]"
-                            )
-                            if error_count >= max_errors:
-                                logger.critical(
-                                    f"Stopping {departamento}: reached {max_errors} download errors. "
-                                    f"{len(records)} actas were saved before stopping. "
-                                    f"Re-run the same command to resume from where this stopped."
+                result_page_num = 1
+                mesa_offset = 0
+
+                while True:
+                    mesas = await extract_mesas(page)
+
+                    for i, mesa in enumerate(mesas):
+                        global_i = mesa_offset + i
+                        if not mesa["available"]:
+                            logger.debug(f"      Skipping unavailable {mesa['mesa']}.")
+                            continue
+                        dest = download_dir / _build_acta_filename(municipio, zona, puesto, global_i)
+                        dest_rel = str(dest.relative_to(PROJ_ROOT))
+                        if dest_rel in already_logged:
+                            logger.debug(f"      Skipping {dest.name} — already in log.")
+                            continue
+                        if dest.exists():
+                            logger.info(f"      Skipping {dest.name} — file exists, adding to log.")
+                        else:
+                            logger.info(f"      Downloading {dest.name}...")
+                            try:
+                                await download_acta_direct(
+                                    page, download_dir, i, municipio, zona, puesto,
+                                    filename_index=global_i,
                                 )
-                                raise TooManyDownloadErrors(
-                                    f"{max_errors} errors in {departamento}"
+                            except Exception as e:
+                                error_count += 1
+                                logger.error(
+                                    f"      Failed to download {dest.name}: {e} "
+                                    f"[error {error_count}/{max_errors}]"
                                 )
-                            continue  # skip recording this mesa — file is not on disk
-                    record = {
-                        "DEPARTAMENTO": departamento,
-                        "MUNICIPIO": municipio,
-                        "ZONA": zona,
-                        "PUESTO": puesto,
-                        "MESA": mesa["mesa"],
-                        "ACTA_PDF": str(dest.relative_to(PROJ_ROOT)),
-                    }
-                    records.append(record)
-                    if log_path is not None:
-                        save_actas_log([record], log_path)
+                                if error_count >= max_errors:
+                                    logger.critical(
+                                        f"Stopping {departamento}: reached {max_errors} download errors. "
+                                        f"{len(records)} actas were saved before stopping. "
+                                        f"Re-run the same command to resume from where this stopped."
+                                    )
+                                    raise TooManyDownloadErrors(
+                                        f"{max_errors} errors in {departamento}"
+                                    )
+                                continue  # skip recording this mesa — file is not on disk
+                        record = {
+                            "DEPARTAMENTO": departamento,
+                            "MUNICIPIO": municipio,
+                            "ZONA": zona,
+                            "PUESTO": puesto,
+                            "MESA": mesa["mesa"],
+                            "ACTA_PDF": str(dest.relative_to(PROJ_ROOT)),
+                        }
+                        records.append(record)
+                        if log_path is not None:
+                            save_actas_log([record], log_path)
+
+                    mesa_offset += len(mesas)
+
+                    paginator = page.locator("app-custom-paginator .page")
+                    total_pages = await paginator.count()
+                    if result_page_num >= total_pages:
+                        break
+
+                    logger.info(f"      Navigating to results page {result_page_num + 1} of {total_pages}...")
+                    await paginator.nth(result_page_num).click()
+                    await page.wait_for_selector(".item-table", state="visible", timeout=PAGE_LOAD_TIMEOUT_MS)
+                    result_page_num += 1
 
     return records
 
