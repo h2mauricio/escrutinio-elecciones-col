@@ -4,15 +4,12 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
-from elecc_colombia.config import INTERIM_DATA_DIR
-
 LOG_COLUMNS = ["RETRIEVAL_TIMESTAMP", "DEPARTAMENTO", "MUNICIPIO", "ZONA", "PUESTO", "MESA", "ACTA_PDF"]
-ACTAS_LOG_PATH = INTERIM_DATA_DIR / "actas_log.csv"
 
 
 def save_actas_log(
     records: list[dict],
-    path: Path = ACTAS_LOG_PATH,
+    path: Path,
     overwrite: bool = False,
 ) -> None:
     """Write records to the actas log CSV.
@@ -38,13 +35,13 @@ def save_actas_log(
         logger.info(f"Appended {len(records)} records to {path}")
 
 
-def load_actas_log(path: Path = ACTAS_LOG_PATH) -> pd.DataFrame:
+def load_actas_log(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
 def load_downloaded_paths(
     departamento: str,
-    path: Path = ACTAS_LOG_PATH,
+    path: Path,
 ) -> set[str]:
     """Return the set of ACTA_PDF paths already logged for a given departamento.
 

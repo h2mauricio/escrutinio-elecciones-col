@@ -3,20 +3,31 @@ Download actas PDFs from the Registraduría website.
 
 Usage examples:
 
-  # Download all departamentos (headless, default CSV)
+  # Download vuelta02 for all departamentos (default)
   uv run python scripts/download_actas.py
 
-  # Download specific departamentos
-  uv run python scripts/download_actas.py --departamentos ARAUCA --departamentos BOLIVAR
+  # Download vuelta01 for all departamentos
+  uv run python scripts/download_actas.py --vuelta vuelta01
 
-  # Use primera vuelta CSV, show browser window
-  uv run python scripts/download_actas.py --csv data/external/lista_departamentos_url.csv --no-headless
+  # Download specific departamentos for vuelta01
+  uv run python scripts/download_actas.py --vuelta vuelta01 -d ARAUCA -d BOLIVAR
+
+  # Override the URL CSV (e.g. for a subset file)
+  uv run python scripts/download_actas.py --csv data/external/my_custom.csv
+
+  # Show browser window with slow interactions
+  uv run python scripts/download_actas.py --no-headless --slow-mo 400
 
   # Start fresh log instead of appending
   uv run python scripts/download_actas.py --overwrite-log
+
+The log CSV is written to data/interim/<vuelta>/actas_<hostname>_log.csv so that
+multiple computers can download in parallel without overwriting each other's logs.
+PDFs are saved to data/raw/<vuelta>/<DEPARTAMENTO>/.
 """
 
 import asyncio
+import socket
 from pathlib import Path
 from typing import Annotated
 
@@ -25,28 +36,40 @@ import typer
 from loguru import logger
 from playwright.async_api import async_playwright
 
-from elecc_colombia.actas_log import ACTAS_LOG_PATH
+from elecc_colombia.actas_log import save_actas_log
 from elecc_colombia.actas_scraper import download_all_actas, TooManyDownloadErrors
 from elecc_colombia.browser_utils import navigate
-from elecc_colombia.config import EXTERNAL_DATA_DIR, RAW_DATA_DIR, READY_SELECTOR, MAX_DOWNLOAD_ERRORS
+from elecc_colombia.config import EXTERNAL_DATA_DIR, RAW_DATA_DIR, INTERIM_DATA_DIR, READY_SELECTOR, MAX_DOWNLOAD_ERRORS
 
 app = typer.Typer(add_completion=False)
 
-DEFAULT_CSV = EXTERNAL_DATA_DIR / "lista_deptos_2da_vuelta_url.csv"
+VALID_VUELTAS = ["vuelta01", "vuelta02"]
+
+
+def _get_hostname() -> str:
+    return socket.gethostname().split(".")[0]
+
+
+def _log_path(vuelta: str) -> Path:
+    hostname = _get_hostname()
+    log_dir = INTERIM_DATA_DIR / vuelta
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / f"actas_{hostname}_log.csv"
 
 
 async def _run(
     deptos_df: pd.DataFrame,
+    vuelta: str,
     headless: bool,
     slow_mo: int,
     overwrite_log: bool,
     max_errors: int,
 ) -> None:
-    # Delete the log file upfront when overwriting so every per-mesa append
-    # starts from a clean slate — no need to track first_write per departamento.
-    if overwrite_log and ACTAS_LOG_PATH.exists():
-        ACTAS_LOG_PATH.unlink()
-        logger.info(f"Cleared existing log: {ACTAS_LOG_PATH}")
+    log_path = _log_path(vuelta)
+
+    if overwrite_log and log_path.exists():
+        log_path.unlink()
+        logger.info(f"Cleared existing log: {log_path}")
 
     async with async_playwright() as pw:
         # TODO: headless mode still fails with ERR_HTTP2_PROTOCOL_ERROR on the Registraduría site
@@ -76,7 +99,7 @@ async def _run(
         for _, row in deptos_df.iterrows():
             departamento = row["DEPARTAMENTO"]
             url = row["URL_ACTAS"]
-            download_dir = RAW_DATA_DIR / departamento.replace(" ", "_")
+            download_dir = RAW_DATA_DIR / vuelta / departamento.replace(" ", "_")
 
             logger.info(f"Starting: {departamento} — {url}")
             page = await context.new_page()
@@ -87,7 +110,7 @@ async def _run(
                 # An error mid-departamento will not lose already-saved records.
                 records = await download_all_actas(
                     page, download_dir, departamento=departamento,
-                    log_path=ACTAS_LOG_PATH,
+                    log_path=log_path,
                     max_errors=max_errors,
                 )
                 logger.success(f"Finished {departamento} — {len(records)} actas logged")
@@ -105,11 +128,18 @@ async def _run(
         await context.close()
         await browser.close()
 
-    logger.info(f"Log saved to: {ACTAS_LOG_PATH}")
+    logger.info(f"Log saved to: {log_path}")
 
 
 @app.command()
 def main(
+    vuelta: Annotated[
+        str,
+        typer.Option(
+            "--vuelta", "-v",
+            help=f"Which election round to download. One of: {', '.join(VALID_VUELTAS)}.",
+        ),
+    ] = "vuelta02",
     departamentos: Annotated[
         list[str] | None,
         typer.Option(
@@ -119,12 +149,13 @@ def main(
         ),
     ] = None,
     csv: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "--csv", "-c",
-            help="CSV file with DEPARTAMENTO and URL_ACTAS columns.",
+            help="CSV file with DEPARTAMENTO and URL_ACTAS columns. "
+                 "Defaults to data/external/lista_<vuelta>_actas_urls.csv.",
         ),
-    ] = DEFAULT_CSV,
+    ] = None,
     headless: Annotated[
         bool,
         typer.Option(
@@ -143,7 +174,7 @@ def main(
         bool,
         typer.Option(
             "--overwrite-log",
-            help="Overwrite the log CSV instead of appending to it.",
+            help="Overwrite this computer's log CSV instead of appending to it.",
         ),
     ] = False,
     max_errors: Annotated[
@@ -156,11 +187,17 @@ def main(
 ) -> None:
     """Download actas PDFs from the Registraduría website for one or more departamentos."""
 
-    if not csv.exists():
-        logger.error(f"CSV file not found: {csv}")
+    if vuelta not in VALID_VUELTAS:
+        logger.error(f"Invalid --vuelta '{vuelta}'. Must be one of: {', '.join(VALID_VUELTAS)}")
         raise typer.Exit(1)
 
-    deptos_df = pd.read_csv(csv)
+    resolved_csv = csv if csv is not None else EXTERNAL_DATA_DIR / f"lista_{vuelta}_actas_urls.csv"
+
+    if not resolved_csv.exists():
+        logger.error(f"CSV file not found: {resolved_csv}")
+        raise typer.Exit(1)
+
+    deptos_df = pd.read_csv(resolved_csv)
     deptos_df["DEPARTAMENTO"] = deptos_df["DEPARTAMENTO"].str.strip()
 
     if departamentos:
@@ -174,10 +211,14 @@ def main(
             logger.error("No matching departamentos found. Exiting.")
             raise typer.Exit(1)
 
+    hostname = _get_hostname()
+    log_path = _log_path(vuelta)
+    logger.info(f"Vuelta: {vuelta} | Computer: {hostname} | Log: {log_path}")
+    logger.info(f"PDFs → data/raw/{vuelta}/<DEPARTAMENTO>/")
     logger.info(f"Departamentos to download ({len(deptos_df)}): {', '.join(deptos_df['DEPARTAMENTO'])}")
-    logger.info(f"Headless: {headless} | Slow-mo: {slow_mo}ms | Log: {ACTAS_LOG_PATH}")
+    logger.info(f"Headless: {headless} | Slow-mo: {slow_mo}ms")
 
-    asyncio.run(_run(deptos_df, headless=headless, slow_mo=slow_mo, overwrite_log=overwrite_log, max_errors=max_errors))
+    asyncio.run(_run(deptos_df, vuelta=vuelta, headless=headless, slow_mo=slow_mo, overwrite_log=overwrite_log, max_errors=max_errors))
 
 
 if __name__ == "__main__":

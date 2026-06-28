@@ -233,7 +233,7 @@ async def download_all_actas(
                             "ZONA": zona,
                             "PUESTO": puesto,
                             "MESA": mesa["mesa"],
-                            "ACTA_PDF": str(dest.relative_to(PROJ_ROOT)),
+                            "ACTA_PDF": dest.relative_to(PROJ_ROOT).as_posix(),
                         }
                         records.append(record)
                         if log_path is not None:

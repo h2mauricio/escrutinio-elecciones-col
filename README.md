@@ -4,7 +4,7 @@
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
 
-Scraping, digitization, and analysis of Colombian electoral actas (E-14 forms) for the 2026 presidential election. The project downloads PDF actas from the Registraduría website, extracts printed metadata via OCR, and saves handwritten number crops for ML-based vote counting.
+Scraping, digitization, and analysis of Colombian electoral actas (E-14 forms) for the 2026 presidential election. The project downloads PDF actas from the Registraduría website for both election rounds (*vuelta01* — first round, *vuelta02* — second round), extracts printed metadata via OCR, and saves handwritten number crops for ML-based vote counting.
 
 ---
 
@@ -26,7 +26,8 @@ Scraping, digitization, and analysis of Colombian electoral actas (E-14 forms) f
       - [Stopping automatically after repeated errors](#stopping-automatically-after-repeated-errors)
     - [2. Extract information from PDFs](#2-extract-information-from-pdfs)
   - [Data structure](#data-structure)
-    - [`data/interim/actas_log.csv` — download log](#datainterimactas_logcsv--download-log)
+    - [`data/raw/` — downloaded PDFs](#dataraw--downloaded-pdfs)
+    - [`data/interim/<vuelta>/actas_<hostname>_log.csv` — download log](#datainterimvueltaactas_hostname_logcsv--download-log)
     - [`data/processed/actas_processed.csv` — enriched log](#dataprocessedactas_processedcsv--enriched-log)
     - [`data/interim/crops/` — handwritten number images](#datainterimcrops--handwritten-number-images)
   - [Key modules](#key-modules)
@@ -170,8 +171,15 @@ The project reads this file automatically via `python-dotenv` when any module fr
 
 ### 1. Download actas
 
+The script supports both election rounds via `--vuelta`. PDFs are saved to
+`data/raw/<vuelta>/<DEPARTAMENTO>/` and one log row per acta is appended to
+`data/interim/<vuelta>/actas_<hostname>_log.csv`, where `<hostname>` is the
+computer's name — so multiple machines can download in parallel without
+overwriting each other's logs.
+
 **Option A — notebook:**
 Run [notebooks/1.01_download_actas_create_log.ipynb](notebooks/1.01_download_actas_create_log.ipynb).
+Set `VUELTA = "vuelta01"` or `"vuelta02"` in the configuration cell at the top.
 
 **Option B — command line** (recommended for unattended runs or when Jupyter is unavailable):
 
@@ -180,25 +188,53 @@ Run [notebooks/1.01_download_actas_create_log.ipynb](notebooks/1.01_download_act
 > until this is resolved.
 
 ```bash
-# Download all departamentos (segunda vuelta, appends to existing log)
-uv run python scripts/download_actas.py --no-headless --slow-mo 400
+# Download all departamentos for the second round (default)
+uv run python scripts/download_actas.py --vuelta vuelta02 --no-headless --slow-mo 400
 
-# Download specific departamentos only
-uv run python scripts/download_actas.py -d ARAUCA -d BOLIVAR -d ANTIOQUIA --no-headless --slow-mo 400
+# Download all departamentos for the first round
+uv run python scripts/download_actas.py --vuelta vuelta01 --no-headless --slow-mo 400
 
-# Use primera vuelta CSV
-uv run python scripts/download_actas.py --csv data/external/lista_departamentos_url.csv --no-headless --slow-mo 400
+# Download specific departamentos for the first round
+uv run python scripts/download_actas.py --vuelta vuelta01 -d ARAUCA -d BOLIVAR --no-headless --slow-mo 400
+
+# Override the URL CSV (e.g. for a custom subset)
+uv run python scripts/download_actas.py --csv data/external/my_subset.csv --no-headless --slow-mo 400
 ```
 
-Both options write PDFs to `data/raw/<DEPARTAMENTO>/` and append one row per acta to `data/interim/actas_log.csv`.
+On startup the script prints the active configuration:
+```
+INFO | Vuelta: vuelta01 | Computer: MacBook-Pro | Log: data/interim/vuelta01/actas_MacBook-Pro_log.csv
+INFO | PDFs → data/raw/vuelta01/<DEPARTAMENTO>/
+```
+
+#### Running on multiple computers in parallel
+
+Split the departamentos list across computers. Each machine uses its own log file
+(named after its hostname), so no coordination is needed. After all computers
+finish, collect the per-machine log CSVs and merge them for postprocessing.
+
+```bash
+# Machine A: first half
+uv run python scripts/download_actas.py --vuelta vuelta01 -d AMAZONAS -d ANTIOQUIA -d ARAUCA --no-headless --slow-mo 400
+
+# Machine B: second half (simultaneously, on a different computer)
+uv run python scripts/download_actas.py --vuelta vuelta01 -d ATLANTICO -d BOLIVAR -d BOYACA --no-headless --slow-mo 400
+```
+
+> **Important:** download all actas for a given departamento on the **same computer**.
+> The resume logic works by reading that computer's own log file — if you start
+> CALDAS on Machine A and then switch to Machine B, Machine B has no record of
+> what was already downloaded and will try to re-download everything.
+> Assign each departamento to exactly one machine and keep it there.
 
 #### Resuming after an error or interruption
 
-Re-run the **exact same command**. The script reads `actas_log.csv` and skips every mesa already recorded there — only missing ones are downloaded:
+Re-run the **exact same command**. The script reads this computer's log and skips
+every mesa already recorded — only missing ones are downloaded:
 
 ```bash
-# Resume CALDAS from where it stopped (no extra flags needed)
-uv run python scripts/download_actas.py -d CALDAS --no-headless --slow-mo 400
+# Resume CALDAS from where it stopped
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --no-headless --slow-mo 400
 ```
 
 The console will confirm how many actas are being skipped:
@@ -208,23 +244,23 @@ INFO  | Resuming CALDAS: 47 actas already logged — skipping.
 
 #### Starting from scratch
 
-To discard the existing log and re-download everything, use `--overwrite-log`.
-> **Warning:** this clears the **entire** log, not just one departamento.
+To discard this computer's log for a vuelta and re-download everything, use `--overwrite-log`.
+> **Warning:** this clears the **entire** log for this computer and vuelta, not just one departamento.
 
 ```bash
-uv run python scripts/download_actas.py --overwrite-log --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --vuelta vuelta01 --overwrite-log --no-headless --slow-mo 400
 ```
 
 #### Stopping automatically after repeated errors
 
-By default the script stops after **10 consecutive mesa download failures** and logs a `CRITICAL` message pointing to the log file. Re-running resumes from where it stopped. To change the threshold:
+By default the script stops after **10 consecutive mesa download failures** and logs a `CRITICAL` message. Re-running resumes from where it stopped. To change the threshold:
 
 ```bash
 # Stop after 5 errors instead of 10
-uv run python scripts/download_actas.py -d CALDAS --max-errors 5 --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --max-errors 5 --no-headless --slow-mo 400
 
-# Never stop automatically (not recommended for unattended runs)
-uv run python scripts/download_actas.py -d CALDAS --max-errors 999 --no-headless --slow-mo 400
+# More tolerant (20 errors before stopping)
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --max-errors 20 --no-headless --slow-mo 400
 ```
 
 See [docs/download_error_handling.md](docs/download_error_handling.md) for the full explanation of error handling and resume logic.
@@ -244,7 +280,21 @@ Output: `data/processed/actas_processed.csv`
 
 ## Data structure
 
-### `data/interim/actas_log.csv` — download log
+### `data/raw/` — downloaded PDFs
+
+PDFs are organized by round and departamento:
+
+```
+data/raw/
+  vuelta01/<DEPARTAMENTO>/*.pdf   ← first-round actas
+  vuelta02/<DEPARTAMENTO>/*.pdf   ← second-round actas
+```
+
+### `data/interim/<vuelta>/actas_<hostname>_log.csv` — download log
+
+One file per computer per round (e.g. `actas_MacBook-Pro_log.csv`,
+`actas_DESKTOP-ABC_log.csv`). Merge these files for full coverage after all
+computers finish.
 
 | Column | Example |
 |---|---|
@@ -254,7 +304,7 @@ Output: `data/processed/actas_processed.csv`
 | `ZONA` | `ZONA 01` |
 | `PUESTO` | `02 - CONCENTRACION CAMILO TORRES` |
 | `MESA` | `Mesa 8` |
-| `ACTA_PDF` | `data/raw/ARAUCA/001_ARAUCA_ZONA_01_02_..._mesa_008.pdf` |
+| `ACTA_PDF` | `data/raw/vuelta01/ARAUCA/001_ARAUCA_ZONA_01_02_..._mesa_008.pdf` |
 
 ### `data/processed/actas_processed.csv` — enriched log
 

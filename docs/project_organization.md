@@ -11,17 +11,27 @@ escrutinio-elecciones-col/
 │
 ├── data/
 │   ├── external/               <- Reference data from third-party sources
-│   │   ├── lista_departamentos_url.csv       <- Departamento URLs (primera vuelta)
-│   │   └── lista_deptos_2da_vuelta_url.csv   <- Departamento URLs (segunda vuelta)
+│   │   ├── lista_vuelta01_actas_urls.csv   <- Departamento URLs (primera vuelta)
+│   │   └── lista_vuelta02_actas_urls.csv   <- Departamento URLs (segunda vuelta)
 │   │
-│   ├── raw/                    <- Downloaded PDF actas, organized by departamento
-│   │   ├── primera_vuelta/
+│   ├── raw/                    <- Downloaded PDF actas, organized by round and departamento
+│   │   ├── vuelta01/           <- Primera vuelta actas
 │   │   │   ├── AMAZONAS/
-│   │   │   └── ANTIOQUIA/
-│   │   └── ARAUCA/             <- Segunda vuelta downloads (flat departamento folders)
+│   │   │   ├── ANTIOQUIA/
+│   │   │   └── …
+│   │   └── vuelta02/           <- Segunda vuelta actas
+│   │       ├── ARAUCA/
+│   │       ├── ATLANTICO/
+│   │       └── …
 │   │
 │   ├── interim/                <- Intermediate data
-│   │   ├── actas_log.csv       <- Download log (one row per acta)
+│   │   ├── vuelta01/           <- Primera vuelta logs (one file per computer)
+│   │   │   ├── actas_MacBook-Pro_log.csv
+│   │   │   ├── actas_DESKTOP-ABC_log.csv
+│   │   │   └── …
+│   │   ├── vuelta02/           <- Segunda vuelta logs (one file per computer)
+│   │   │   ├── actas_MacBook-Pro_log.csv
+│   │   │   └── …
 │   │   └── crops/              <- Handwritten number crops for ML training
 │   │       └── <DEPARTAMENTO>/
 │   │           └── <pdf_stem>/
@@ -44,11 +54,14 @@ escrutinio-elecciones-col/
 │       ├── train.py            <- Model training (future)
 │       └── predict.py          <- Model inference (future)
 │
+├── scripts/
+│   └── download_actas.py       <- CLI entry point for downloading actas
+│
 ├── notebooks/                  <- Jupyter notebooks, numbered by workflow step
 │   ├── 0.01_example_playwright.ipynb          <- Playwright smoke test
 │   ├── 0.02_selecting_options_website.ipynb   <- Dropdown interaction exploration
 │   ├── 0.03_download_actas_example.ipynb      <- Single-acta download example
-│   ├── 1.01_download_actas_create_log.ipynb   <- Full download pipeline
+│   ├── 1.01_download_actas_create_log.ipynb   <- Full download pipeline (notebook form)
 │   ├── 1.02_extract_info_acta_pdf.ipynb       <- Printed-text extraction + crop saving
 │   └── 1.03_interpret_handwriting_data_acta.ipynb  <- Handwriting ML (in progress)
 │
@@ -59,20 +72,23 @@ escrutinio-elecciones-col/
 ├── tests/                      <- Automated tests
 └── docs/                       <- Project documentation
     ├── project_organization.md <- This file
-    └── colombia_votacion_header.csv  <- Expected CSV column schema
+    ├── download_error_handling.md
+    └── web_scraping.md
 ```
 
 ## Data flow
 
 ```
-data/external/lista_departamentos_url.csv
+data/external/lista_vuelta01_actas_urls.csv   (or lista_vuelta02_actas_urls.csv)
         │
         ▼
-[1.01] actas_scraper.py  ──────────────────►  data/raw/<DEPARTAMENTO>/*.pdf
-        │                                               │
-        ▼                                               │
-data/interim/actas_log.csv                             │
-                                                        ▼
+[scripts/download_actas.py --vuelta vuelta01]
+        │
+        ├─── actas_scraper.py  ──────────────────►  data/raw/vuelta01/<DEPARTAMENTO>/*.pdf
+        │
+        └─── actas_log.py  ─────────────────────►  data/interim/vuelta01/actas_<hostname>_log.csv
+                                                              │
+                                                              ▼
                               [1.02] acta_text_reader.py   (Tesseract — printed fields)
                               [1.02] acta_handwrite_reader.py (EasyOCR — crop saving)
                                         │
@@ -80,3 +96,18 @@ data/interim/actas_log.csv                             │
                         data/interim/crops/<DEPARTAMENTO>/<pdf_stem>/*.png
                         data/processed/actas_processed.csv
 ```
+
+## Log file naming convention
+
+Because downloads for a single round are often split across multiple computers,
+each machine writes its own log file named after its hostname:
+
+```
+data/interim/vuelta01/
+  actas_MacBook-Pro_log.csv     ← downloads done on macOS laptop
+  actas_DESKTOP-ABC_log.csv     ← downloads done on Windows desktop
+  actas_ubuntu-server_log.csv   ← downloads done on Linux machine
+```
+
+These files are merged manually during postprocessing. The `ACTA_PDF` column
+uses forward-slash paths on all platforms for consistency.

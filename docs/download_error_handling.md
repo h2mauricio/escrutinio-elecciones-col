@@ -2,7 +2,7 @@
 
 This document describes how `scripts/download_actas.py` and the underlying
 `elecc_colombia/actas_scraper.py` handle failures and allow interrupted
-downloads to be safely resumed.
+downloads to be safely resumed, for both election rounds (`vuelta01` and `vuelta02`).
 
 ---
 
@@ -34,12 +34,16 @@ Mesa 4 downloaded → row written to CSV
 
 If the process is killed at any point, all previously written rows are safe.
 
-This is controlled by the `log_path` parameter passed from the script:
+This is controlled by the `log_path` parameter passed from the script. The path
+is derived from the `--vuelta` option and the machine's hostname:
 
 ```python
+# e.g. data/interim/vuelta01/actas_MacBook-Pro_log.csv
+log_path = INTERIM_DATA_DIR / vuelta / f"actas_{hostname}_log.csv"
+
 records = await download_all_actas(
     page, download_dir, departamento=departamento,
-    log_path=ACTAS_LOG_PATH,   # enables per-mesa saving
+    log_path=log_path,   # enables per-mesa saving
 )
 ```
 
@@ -76,10 +80,10 @@ To change the threshold:
 
 ```bash
 # Stop sooner (5 errors)
-uv run python scripts/download_actas.py -d CALDAS --max-errors 5 --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --max-errors 5 --no-headless --slow-mo 400
 
 # More tolerant (20 errors before stopping)
-uv run python scripts/download_actas.py -d CALDAS --max-errors 20 --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --max-errors 20 --no-headless --slow-mo 400
 ```
 
 After the script stops, re-running the same command resumes automatically —
@@ -108,7 +112,7 @@ For each mesa, the check order is:
 To resume after an interruption, simply re-run the same command:
 
 ```bash
-uv run python scripts/download_actas.py -d CALDAS --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --no-headless --slow-mo 400
 ```
 
 Already-completed mesas are skipped instantly; only missing ones are
@@ -118,15 +122,15 @@ downloaded.
 
 ## Starting a fresh download
 
-To discard the existing log for a departamento and re-download everything:
+To discard this computer's log for a vuelta and re-download everything:
 
 ```bash
-uv run python scripts/download_actas.py -d CALDAS --overwrite-log --no-headless --slow-mo 400
+uv run python scripts/download_actas.py --vuelta vuelta01 -d CALDAS --overwrite-log --no-headless --slow-mo 400
 ```
 
-`--overwrite-log` deletes `actas_log.csv` before the run starts, so every
-mesa is treated as new. The PDF files on disk are also re-downloaded if the
-file is absent (existing files are still skipped to avoid redundant work).
+`--overwrite-log` deletes this computer's log CSV before the run starts, so every
+mesa is treated as new. Existing PDF files on disk are still skipped to avoid
+redundant downloads.
 
 ---
 
@@ -137,3 +141,4 @@ file is absent (existing files are still skipped to avoid redundant work).
 | `load_downloaded_paths(departamento, path)` | `actas_log.py` | Returns the set of `ACTA_PDF` paths already in the log for a departamento |
 | `save_actas_log([record], log_path)` | `actas_log.py` | Appends a single record to the CSV immediately after download |
 | `download_all_actas(..., log_path)` | `actas_scraper.py` | Orchestrates the per-mesa download loop with error handling and resume logic |
+| `scripts/download_actas.py` | CLI | `--vuelta`, departamento filter, `--max-errors`, `--overwrite-log` |

@@ -6,7 +6,7 @@ from loguru import logger
 from elecc_colombia.config import PROCESSED_DATA_DIR, PROJ_ROOT
 from elecc_colombia.acta_text_reader import read_printed_info
 from elecc_colombia.acta_handwrite_reader import save_handwritten_crops, CropSpec
-from elecc_colombia.actas_log import ACTAS_LOG_PATH, load_actas_log
+from elecc_colombia.actas_log import load_actas_log
 
 PROCESSED_LOG_PATH = PROCESSED_DATA_DIR / "actas_processed.csv"
 
@@ -41,7 +41,7 @@ def process_acta(
 
 
 def process_actas_log(
-    log_path: Path = ACTAS_LOG_PATH,
+    log_path: Path,
     output_path: Path = PROCESSED_LOG_PATH,
     crop_spec: CropSpec | dict[str, CropSpec] | None = None,
 ) -> pd.DataFrame:

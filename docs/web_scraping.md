@@ -5,18 +5,24 @@ downloads the E-14 acta PDFs for each voting mesa.
 
 ---
 
-## Source website
+## Source websites
 
 The Registraduría Nacional publishes digitised acta images for each voting
-round at:
+round at a different subdomain, but with the same URL structure and page format:
 
-```
-https://e14segundavueltapresidente.registraduria.gov.co/departamento/<ID>
-```
+| Round | URL pattern |
+|---|---|
+| Primera vuelta (`vuelta01`) | `https://divulgacione14presidente.registraduria.gov.co/departamento/<ID>` |
+| Segunda vuelta (`vuelta02`) | `https://e14segundavueltapresidente.registraduria.gov.co/departamento/<ID>` |
 
-One URL per departamento is listed in `data/external/lista_deptos_2da_vuelta_url.csv`.
+One URL per departamento for each round is listed in:
+- `data/external/lista_vuelta01_actas_urls.csv`
+- `data/external/lista_vuelta02_actas_urls.csv`
+
 Each page is a single-page Angular application that renders results through
-a chain of dropdown filters.
+a chain of dropdown filters. The departamentos, municipios, zonas, and puestos
+are the same across both rounds; there may be minor differences in mesa
+numbering and labeling.
 
 ---
 
@@ -86,7 +92,7 @@ For each available mesa the scraper:
 1. Clicks the download icon (`.open-pdf`) directly on the mesa card — this
    skips the intermediate preview modal for speed.
 2. Waits up to `NETWORK_TIMEOUT_MS` (30 s) for the browser download event.
-3. Saves the file to `data/raw/<DEPARTAMENTO>/<filename>.pdf` using a
+3. Saves the file to `data/raw/<vuelta>/<DEPARTAMENTO>/<filename>.pdf` using a
    deterministic filename built from Municipio, Zona, Puesto, and mesa index:
 
 ```
@@ -95,11 +101,11 @@ e.g. 001_ARAUCA_ZONA_03_02_CONCESCOLAR_LAS_COROCORAS_mesa_008.pdf
 ```
 
 4. Dismisses the confirmation popup (Aceptar button).
-5. Writes one row to `data/interim/actas_log.csv` immediately.
+5. Writes one row to `data/interim/<vuelta>/actas_<hostname>_log.csv` immediately.
 
 ### 6. Skip already-downloaded mesas
 
-Before starting, the scraper reads `actas_log.csv` for the current
+Before starting, the scraper reads this computer's log CSV for the current
 departamento and builds a set of already-logged PDF paths. Any mesa whose
 path is already in the set is skipped entirely — no download, no duplicate
 log entry. This makes every run safely resumable.
@@ -149,4 +155,4 @@ logs a `CRITICAL` message. Re-running the same command resumes automatically.
 | `elecc_colombia/browser_utils.py` | Low-level Playwright helpers: `navigate`, `open_dropdown`, `select_option_by_text`, `get_options`, `select_page_size` |
 | `elecc_colombia/actas_log.py` | Append-safe CSV writer; `load_downloaded_paths` for resume logic |
 | `elecc_colombia/config.py` | All tunable constants: timeouts, error thresholds, paths, selectors |
-| `scripts/download_actas.py` | CLI entry point: departamento filter, `--max-errors`, `--overwrite-log` |
+| `scripts/download_actas.py` | CLI entry point: `--vuelta`, departamento filter, `--max-errors`, `--overwrite-log` |
